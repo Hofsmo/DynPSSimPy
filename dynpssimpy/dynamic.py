@@ -1,4 +1,5 @@
 import numpy as np
+import jax.numpy as jnp
 
 import dynpssimpy.utility_functions as dps_uf
 import dynpssimpy.dynamic as dps
@@ -7,6 +8,7 @@ import dynpssimpy.dyn_models as mdl_lib
 import scipy.sparse as sp
 from scipy.sparse import linalg as sp_linalg
 from scipy.sparse import diags as sp_diags
+from jax.scipy import linalg as jx_linalg
 
 import importlib
 importlib.reload(mdl_lib)
@@ -298,7 +300,7 @@ class PowerSystemModel:
         for mdl in self.dyn_mdls:
             mdl.reset_outputs()
 
-        dx = np.zeros(self.n_states)
+        dx = jnp.zeros(self.n_states)
         for mdl in self.mdl_instructions['state_derivatives']:
             mdl.state_derivatives(dx, x, v_red)
 
@@ -311,19 +313,19 @@ class PowerSystemModel:
         :param x:
         :return:
         '''
-        i_inj = np.zeros(self.n_bus_red, dtype=complex)
+        i_inj = jnp.zeros(self.n_bus_red, dtype=complex)
         for mdl in self.mdl_instructions['current_injections']:
             bus_idx_red, i_inj_mdl = mdl.current_injections(x, None)
-            np.add.at(i_inj, bus_idx_red, i_inj_mdl)
+            i_inj = i_inj.at[bus_idx_red].add(i_inj_mdl)
 
         y_var = np.zeros((self.n_bus,) * 2, dtype=complex)
         for mdl in self.mdl_instructions['dyn_var_adm']:
             data, (row_idx, col_idx) = mdl.dyn_var_adm()
             sp_mat = sp.csr_matrix((data, (row_idx, col_idx)), shape=(self.n_bus,) * 2)
             y_var += sp_mat.todense()
-        y_var = sp.csr_matrix(y_var)
 
-        return sp_linalg.spsolve(self.y_bus_red + y_var + self.y_bus_red_mod, i_inj)
+        return jx_linalg.solve(self.y_bus_red.todense() + y_var +
+                               self.y_bus_red_mod.todense(), i_inj)
 
     def no_fun(self):
         # Interfacing models  with system (current injections)

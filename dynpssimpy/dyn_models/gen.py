@@ -1,4 +1,5 @@
 import numpy as np
+import jax.numpy as jnp
 from dynpssimpy.dyn_models.utils import DAEModel
 import dynpssimpy.utility_functions as dps_uf
 
@@ -105,9 +106,9 @@ class GEN(DAEModel):
 
     def current_injections(self, x, v):
         p = self.par
-        X = self.local_view(x)
-        i_inj_d = X['e_q_st'] / (1j * p['X_d_st']) * self.q(x, v) * p['N_par']
-        i_inj_q = X['e_d_st'] / (1j * p['X_q_st']) * self.d(x, v) * p['N_par']
+        # X = self.local_view(x)
+        i_inj_d =  x[self.state_idx_global['e_q_st']] / (1j * p['X_d_st']) * self.q(x, v) * p['N_par']
+        i_inj_q = x[self.state_idx_global['e_d_st']] / (1j * p['X_q_st']) * self.d(x, v) * p['N_par']
         i_inj = i_inj_d + i_inj_q
 
         I_n = p['S_n'] / (np.sqrt(3) * p['V_n'])
@@ -120,28 +121,52 @@ class GEN(DAEModel):
         return self.bus_idx_red['terminal'], I_inj
 
     def state_derivatives(self, dx, x, v):
-        dX = self.local_view(dx)
-        X = self.local_view(x)
+        # dX = jnp.asarray(self.local_view(dx))
+        # X = self.local_view(x)
+        # dx = jnp.asarray(dx)
         p = self.par
 
-        T_m = self.P_m(x, v)/(1 + X['speed'])
+        T_m = self.P_m(x, v)/(1 + x[self.state_idx_global['speed']])
         P_e = self.p_e(x, v)
 
         PF_n = p['PF_n'] if 'PF_n' in p.dtype.names else 1
         H = p['H']/PF_n
 
-        dX['speed'][:] = 1 / (2 * H) * (T_m - P_e/PF_n - p['D'] * X['speed'])
-        dX['angle'][:] = X['speed'] * 2 * np.pi * self.sys_par['f_n']
-        dX['e_q_t'][:] = 1 / (p['T_d0_t']) * (self.E_f(x, v) + self.v_aux(x, v) - X['e_q_t'] - self.i_d(x, v) * (p['X_d'] - p['X_d_t']))
-        dX['e_d_t'][:] = 1 / (p['T_q0_t']) * (-X['e_d_t'] + self.i_q(x, v) * (p['X_q'] - p['X_q_t']))
-        dX['e_q_st'][:] = 1 / (p['T_d0_st']) * (X['e_q_t'] - X['e_q_st'] - self.i_d(x, v) * (p['X_d_t'] - p['X_d_st']))
-        dX['e_d_st'][:] = 1 / (p['T_q0_st']) * (X['e_d_t'] - X['e_d_st'] + self.i_q(x, v) * (p['X_q_t'] - p['X_q_st']))
+        dx = dx[self.state_idx_global['speed']].at[:].set(1 / (2 * H) * (T_m -
+                                                                    P_e/PF_n -
+                                                                    p['D'] *
+                                                                    x[self.state_idx_global['speed']]))
+        dx = dx[self.state_idx_global['angle']].at[:].set(x[self.state_idx_global['speed']]
+                                                     * 2 * np.pi *
+                                                     self.sys_par['f_n'])
+        dx = dx[self.state_idx_global['e_q_t']].at[:].set(1 / (p['T_d0_t']) *
+                                                     (self.E_f(x, v) +
+                                                      self.v_aux(x, v))
+                                              - x[self.state_idx_global['e_q_t']] - self.i_d(x, v) * (p['X_d'] - p['X_d_t']))
+        dx = dx[self.state_idx_global['e_d_t']].at[:].set(1 / (p['T_q0_t']) *
+                                                     (-x[self.state_idx_global['e_d_t']]
+                                                      + self.i_q(x, v) *
+                                                      (p['X_q'] - p['X_q_t'])))
+        dx = dx[self.state_idx_global['e_q_st']].at[:].set(1 / (p['T_d0_st'])
+                                                      *(x[self.state_idx_global['e_q_t']]
+                                                        -
+                                                        x[self.state_idx_global['e_q_st']]
+                                                        - self.i_d(x, v) *
+                                                        (p['X_d_t'] -
+                                                         p['X_d_st'])))
+        dx = dx[self.state_idx_global['e_d_st']].at[:].set(1 / (p['T_q0_st']) *
+                                                      (x[self.state_idx_global['e_d_t']]
+                                                       -
+                                                       x[self.state_idx_global['e_q_st']]
+                                                       + self.i_q(x, v) *
+                                                       (p['X_q_t'] -
+                                                        p['X_q_st'])))
 
     def d(self, x, v):
-        return np.exp(1j * (self.local_view(x)['angle'] - np.pi / 2))
+        return jnp.exp(1j * ( x[self.state_idx_global['angle']]- np.pi / 2))
 
     def q(self, x, v):
-        return np.exp(1j * self.local_view(x)['angle'])
+        return jnp.exp(1j * x[self.state_idx_global['angle']])
 
     def v_t(self, x, v):
         return v[self.bus_idx_red['terminal']]
@@ -153,10 +178,10 @@ class GEN(DAEModel):
         return self.par['V']
 
     def e_q_st(self, x, v):
-        return self.local_view(x)['e_q_st']
+        return x[self.state_idx_global['e_q_st']]
 
     def e_d_st(self, x, v):
-        return self.local_view(x)['e_d_st']
+        return x[self.state_idx_global['e_d_st']]
 
     def e_q_t(self, x, v):
         return self.local_view(x)['e_q_t']
@@ -165,7 +190,7 @@ class GEN(DAEModel):
         return self.local_view(x)['e_d_t']
 
     def angle(self, x, v):
-        return self.local_view(x)['angle']
+        return x[self.state_idx_global['angle']]
 
     def speed(self, x, v):
         return self.local_view(x)['speed']
@@ -180,18 +205,18 @@ class GEN(DAEModel):
         return (self.e_st(x, v) - self.v_t(x, v)) / (1j * self.par['X_d_st'])
 
     def i_d(self, x, v):
-        i_dq = self.i(x, v)*np.exp(1j*(np.pi/2 - self.angle(x, v)))
+        i_dq = self.i(x, v)*jnp.exp(1j*(np.pi/2 - self.angle(x, v)))
         return i_dq.real
 
     def i_q(self, x, v):
-        i_dq = self.i(x, v)*np.exp(1j*(np.pi/2 - self.angle(x, v)))
+        i_dq = self.i(x, v)*jnp.exp(1j*(np.pi/2 - self.angle(x, v)))
         return i_dq.imag
 
     # def p_e_2(self, x, v):
     #     return (self.e_q_st(x, v) * self.i_q(x, v) + self.e_d_st(x, v) * self.i_d(x, v))/self.par['PF_n']  # - (x_d_st - x_q_st) * i_d * i_q
 
     def s_e(self, x, v):
-        return self.v_t(x, v)*np.conj(self.i(x, v))
+        return self.v_t(x, v)*jnp.conj(self.i(x, v))
 
     def p_e(self, x, v):
         return self.s_e(x, v).real
